@@ -1,0 +1,8 @@
+[project]
+name = "np-next-api"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["fastapi>=0.116", "uvicorn[standard]>=0.35", "pydantic-settings>=2.10"]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "httpx>=0.28"]
