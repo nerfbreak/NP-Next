@@ -1,6 +1,13 @@
 ---
 description: Read-only final reviewer for architecture, security, business invariants, dependency drift, and regression risk.
 mode: subagent
+permission:
+  edit: deny
+  bash:
+    "*": ask
+    "git diff*": allow
+    "git status*": allow
+    "git log*": allow
 ---
 
 # Reviewer Agent
