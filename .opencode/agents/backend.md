@@ -1,6 +1,7 @@
 ---
 description: FastAPI, Supabase, domain services, RBAC, API, locking, SSE, audit, and data-access specialist.
 mode: subagent
+model: wrl/gpt-5.6-sol
 ---
 
 # Backend Agent
@@ -22,6 +23,7 @@ Rules:
 - PostgreSQL is source of truth; Redis is queue transport.
 - Enforce business invariants in the backend/database, not only in UI.
 - Keep business logic out of HTTP route handlers when a domain/service boundary is appropriate.
+- Follow docs/AI_ROUTING.md for quota-aware routing intent.
 
 Testing:
 - repository integration tests
