@@ -1,6 +1,7 @@
 ---
 description: ARQ, Redis, Playwright, worker lifecycle, cancellation, heartbeat, timeout, retry, and browser cleanup specialist.
 mode: subagent
+model: wrl/gpt-5.6-sol
 ---
 
 # Worker Agent
@@ -22,5 +23,6 @@ Rules:
 - Inventory mutation jobs must not blindly auto-retry after partial side effects.
 - Cancellation is incomplete until Playwright/browser resources have stopped and the run/lock state is reconciled.
 - Worker failure must not leave a distributor permanently locked.
+- Follow docs/AI_ROUTING.md for quota-aware routing intent.
 
 Test cancellation, timeout, stale heartbeat, browser cleanup, partial execution, and recovery paths.
