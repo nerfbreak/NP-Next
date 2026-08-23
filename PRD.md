@@ -18,19 +18,13 @@ Streamlit is reference-only and is not part of the target product.
 - Observable, auditable, recoverable executions.
 - Preserve verified legacy behavior unless explicitly changed.
 
-## Non-goals
-
-Do not introduce Streamlit, Celery, scheduler/beat/cron business workflows, direct frontend access to credentials, or hardcoded distributor/warehouse/multiplier/SKU exceptions.
-
 ## Roles
 
 ### SUPERUSER
-
 Manage users, distributors, global settings, SKU rules, multiplier rules, workers, audit logs, execution history, and any task.
 
 ### OPERATOR
-
-Run supported workflows, view dashboard/tasks/workers, and cancel their own tasks. Operators cannot manage users, credentials, global rules, or another user's task.
+Run supported workflows, view dashboard/tasks/workers, and cancel their own tasks. Cannot manage users, credentials, global rules, or another user's task.
 
 ## Target Architecture
 
@@ -58,10 +52,6 @@ Newspage / SharePoint / external systems
 - Workers: actual automation, heartbeat, events, cleanup.
 - Supabase: persistent business state and configuration.
 
-## Authentication
-
-Use Supabase Auth for identity. Application profiles live in `profiles` with `role = superuser | operator` and `is_active`.
-
 ## Distributor Management
 
 Superuser manages distributors from the application. Operators do not need to use the Supabase dashboard.
@@ -83,9 +73,9 @@ created_at
 updated_at
 ```
 
-All distributors share the same Newspage login URL, stored globally in system settings. `base_url` is not a distributor field. `warehouse` belongs to the distributor and is the source of truth for warehouse filtering/selection.
+All distributors share the same Newspage login URL, stored globally in system settings. `base_url` is not a distributor field.
 
-Disabled distributors cannot start new tasks. The distributor fleet is 95+ and growing, so selectors must be searchable.
+`warehouse` belongs to the distributor and is the source of truth for warehouse filtering/selection. Disabled distributors cannot start new tasks. The distributor fleet is 95+ and growing, so selectors must be searchable.
 
 ## Distributor Concurrency
 
@@ -93,32 +83,11 @@ Locking is per distributor, not global and not per user. Active states are `queu
 
 A distributor can have at most one active run. Different distributors can run concurrently.
 
-```text
-Distributor A -> Budi -> running
-Distributor B -> Sinta -> running
-Distributor C -> available
-```
+The backend must enforce the lock regardless of frontend state. PostgreSQL is authoritative through a partial unique index. Frontend disables Run for the locked distributor and shows who is using it; other distributors stay runnable.
 
-Backend must enforce the lock regardless of frontend state. PostgreSQL is authoritative through a partial unique index. Frontend disables Run for the locked distributor and shows who is using it; other distributors stay runnable.
+## Dashboard and Workers
 
-## Dashboard
-
-The dashboard must show:
-
-- total/standby/busy/offline workers
-- active/queued runs
-- locked/available distributors
-- user running each task
-- workflow type
-- worker assignment
-- current step
-- progress
-- start time/duration
-- recent execution history
-
-Updates must work without full-page refresh.
-
-## Worker Management
+Dashboard must show total/standby/busy/offline workers, active/queued runs, locked/available distributors, current user/workflow/worker, current step, progress, duration, and recent runs. Updates do not require full-page refresh.
 
 Worker states:
 
@@ -131,20 +100,9 @@ offline
 error
 ```
 
-One worker handles one active automation initially.
+One worker handles one active automation initially. Baseline heartbeat is 15 seconds with a 180 second stale threshold; both are configurable. Worker failure must not leave a distributor locked forever. Capacity may scale dynamically with queue pressure; infrastructure provisions/removes workers.
 
-Baseline heartbeat:
-
-```text
-interval = 15 seconds
-stale threshold = 180 seconds
-```
-
-These are configurable. Worker failure must not leave a distributor locked forever.
-
-Worker capacity may scale dynamically with queue pressure. Infrastructure, not the application, provisions/removes workers.
-
-## Automation Run Lifecycle
+## Automation Runs and Cancellation
 
 ```text
 queued -> running -> completed
@@ -153,46 +111,29 @@ queued -> running -> completed
         -> cancelling -> cancelled
 ```
 
-A run stores workflow, distributor, requester, worker, current step, progress, heartbeats, parser snapshot, timeout snapshot, retry snapshot, result summary, errors, and timestamps.
-
-Configuration snapshots are required for reproducibility.
-
-## Task Cancellation
+A run stores workflow, distributor, requester, worker, current step, progress, heartbeat, parser snapshot, timeout snapshot, retry snapshot, result summary, errors, and timestamps.
 
 Cancellation is real execution cancellation:
 
 ```text
 Cancel request
-  -> permission check
-  -> run = cancelling
-  -> abort ARQ job
-  -> cancel worker coroutine
-  -> close/terminate Playwright browser/context/processes
-  -> run = cancelled
-  -> release distributor lock
-  -> worker = standby
+ -> permission check
+ -> run = cancelling
+ -> abort ARQ job
+ -> cancel worker coroutine
+ -> close/terminate Playwright browser/context/processes
+ -> run = cancelled
+ -> release distributor lock
+ -> worker = standby
 ```
 
 The lock is not released until execution has actually stopped. Operators cancel their own tasks; Superuser can cancel any task. Cancelled runs remain in history/audit data.
 
 ## Adaptive Timeout
 
-Timeout is dynamic. Separate navigation, action, and overall-job limits exist.
+Timeout is dynamic with separate navigation, action, and overall-job limits. It may extend while heartbeat is healthy, progress is occurring, a known long step is running, or transient network retries are active. A configurable hard maximum remains.
 
-Timeout may extend when heartbeat is healthy, progress is being made, a known long-running step is active, or transient network retries are occurring. A configurable hard maximum remains as a safety ceiling.
-
-Initial baselines may be:
-
-```text
-navigation: 60s
-navigation max: 180s
-action: 30s
-action max: 60s
-overall baseline: 30m
-overall max: several hours
-```
-
-Exact values are settings. ARQ infrastructure timeout is a safety ceiling, not the only business timeout mechanism.
+Initial baselines may be 60s navigation, 30s action, and 30m overall, with higher configurable maxima including several hours for overall execution. ARQ timeout is infrastructure safety, not the only business timeout mechanism.
 
 ## Realtime
 
@@ -231,8 +172,6 @@ distributor.unlocked
 
 Inventory Adjustment is the first migration vertical slice.
 
-Canonical flow:
-
 ```text
 Select Distributor
  -> Upload Distributor Stock Excel
@@ -267,13 +206,7 @@ Quantity column
 -> if not found, fallback to zero-based index 71
 ```
 
-Dropdown mapping remains available. Priority is:
-
-```text
-user override > distributor stock_import_mapping JSONB > global default
-```
-
-The final mapping used by a run must be snapshotted.
+Dropdown mapping remains available. Priority is `user override > distributor stock_import_mapping JSONB > global default`. The final mapping used by a run must be snapshotted.
 
 ### INVT_MASTER
 
@@ -281,7 +214,7 @@ The final mapping used by a run must be snapshotted.
 
 ### SKU leading-zero rules
 
-Global rules exist because Excel may drop leading zeroes. Current rules:
+These global rules exist because Excel can drop leading zeroes:
 
 ```text
 135428
@@ -328,11 +261,9 @@ Each rule prepends exactly one `0`:
 
 Multipliers are scoped by `distributor_id + sku`, with at most one active rule per pair. The multiplier is applied to distributor quantity before aggregation/comparison.
 
-### Warehouse
+### Warehouse and comparison
 
 Use `distributors.warehouse`. Do not hardcode `GOOD_WHS`, `GUDANG UTAMA`, or legacy distributor exception mappings.
-
-### Comparison
 
 Canonical formula:
 
@@ -347,22 +278,7 @@ Newspage 100, Distributor 80  -> -20
 Newspage 100, Distributor 120 -> +20
 ```
 
-`Selisih` becomes the adjustment quantity for execution.
-
-### Review UI
-
-At minimum show:
-
-```text
-SKU
-Newspage Qty
-Distributor Qty
-Multiplier
-Selisih
-Status
-```
-
-Execution is a separate explicit action after review.
+`Selisih` becomes the adjustment quantity for execution. Review UI must show at minimum SKU, Newspage Qty, Distributor Qty, Multiplier, Selisih, and Status. Execution is a separate explicit action after review.
 
 ## Other Workflows
 
@@ -432,19 +348,15 @@ Detailed contracts live in `docs/API.md`.
 
 ## ARQ
 
-Jobs are manually triggered. No scheduler.
-
-Job payloads use a `run_id`, not credentials:
+Jobs are manually triggered. No scheduler. Payloads use a `run_id`, not credentials:
 
 ```python
 await redis.enqueue_job("run_inventory_adjustment", run_id)
 ```
 
-The worker loads run and distributor configuration server-side. Use ARQ abort/cancellation plus explicit Playwright cleanup.
+The worker loads run/distributor configuration server-side. Use ARQ abort/cancellation plus explicit Playwright cleanup. Do not blindly auto-retry inventory mutation after partial execution.
 
-Do not blindly auto-retry inventory mutation after partial execution.
-
-## Testing
+## Testing and invariants
 
 Required layers:
 
@@ -523,65 +435,24 @@ The final product has zero runtime dependency on Streamlit.
 
 A feature is done when the PRD is satisfied, tests pass, business invariants are covered, security is respected, state is persisted correctly, required realtime/audit behavior exists, documentation/contracts are updated, and no forbidden Streamlit dependency is introduced.
 
-Automation features also require worker execution, heartbeat, cancellation, distributor locking, persistence, and failure-path verification.
+Automation work also requires verified worker execution, heartbeat, cancellation, distributor locking, persistence, and failure-path handling.
 
 ## Acceptance Criteria
 
-### AC-001 Native frontend
-
-A clean NP-Next checkout uses Next.js for the frontend and FastAPI for the API. Streamlit is not required.
-
-### AC-002 Distributor lock
-
-If Distributor A is running under Budi, Sinta cannot start Distributor A but can start Distributor B.
-
-### AC-003 Dashboard visibility
-
-If Budi runs Distributor A, the dashboard shows it as locked, identifies Budi/workflow, and keeps other distributors available.
-
-### AC-004 Worker visibility
-
-Dashboard accurately shows worker standby/busy/offline state and current assignments.
-
-### AC-005 Manual jobs only
-
-No business automation job is created without an explicit trigger defined by the product.
-
-### AC-006 Excel defaults
-
-Legacy-format stock files default to SKU index 20 and quantity `StokAkhir`, falling back to index 71.
-
-### AC-007 Mapping override
-
-Operators can override detected SKU/quantity/warehouse/active columns via dropdowns.
-
-### AC-008 SKU normalization
-
-`135428` becomes `0135428`; `22583` becomes `022583`; `8021803` remains `8021803` without a special exclusion.
-
-### AC-009 Multiplier
-
-Given raw quantity 50 and multiplier 2, comparison quantity is 100 before comparison.
-
-### AC-010 Comparison
-
-Given Newspage 100 and Distributor 80, `Selisih = -20` and adjustment quantity is -20.
-
-### AC-011 Cancellation
-
-Authorized cancel moves the run through `cancelling`, aborts ARQ, terminates Playwright resources, persists `cancelled`, and only then releases the distributor lock.
-
-### AC-012 Credential safety
-
-Plaintext distributor credentials never appear in ARQ payloads, logs, SSE events, or frontend responses after storage.
-
-### AC-013 Reproducibility
-
-A run stores the parser/timeout/retry configuration snapshot used for that execution.
-
-### AC-014 Audit
-
-Administrative configuration changes record actor, action, entity, and timestamp.
+- **AC-001 Native frontend:** Clean NP-Next uses Next.js + FastAPI; Streamlit is not required.
+- **AC-002 Distributor lock:** If Distributor A is running under Budi, Sinta cannot start A but can start B.
+- **AC-003 Dashboard visibility:** If Budi runs A, dashboard shows A locked and identifies Budi/workflow while other distributors remain available.
+- **AC-004 Worker visibility:** Dashboard accurately shows worker standby/busy/offline state and assignments.
+- **AC-005 Manual jobs:** No business automation runs without an explicit product-defined trigger.
+- **AC-006 Excel defaults:** Legacy-format files default to SKU index 20 and quantity `StokAkhir`, fallback index 71.
+- **AC-007 Mapping override:** Operators can override SKU/quantity/warehouse/active columns via dropdowns.
+- **AC-008 SKU normalization:** `135428 -> 0135428`, `22583 -> 022583`, and `8021803` remains `8021803` without a special exclusion.
+- **AC-009 Multiplier:** Raw quantity 50 with multiplier 2 becomes comparison quantity 100 before comparison.
+- **AC-010 Comparison:** Newspage 100 and Distributor 80 produces `Selisih = -20` and adjustment quantity -20.
+- **AC-011 Cancellation:** Authorized cancellation moves through `cancelling`, aborts ARQ, terminates Playwright, persists `cancelled`, then releases the lock.
+- **AC-012 Credential safety:** Plaintext credentials never appear in ARQ payloads, logs, SSE events, or frontend responses after storage.
+- **AC-013 Reproducibility:** A run stores parser/timeout/retry snapshots.
+- **AC-014 Audit:** Administrative configuration changes record actor, action, entity, and timestamp.
 
 ## Locked Decisions
 
