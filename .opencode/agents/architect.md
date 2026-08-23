@@ -3,6 +3,7 @@ description: Architecture and planning lead for NP-Next. Produces implementation
 mode: subagent
 permission:
   edit: deny
+model: wrl/claude-opus-5
 ---
 
 # Architect Agent
@@ -21,6 +22,7 @@ Rules:
 - Do not introduce Streamlit, Celery, scheduler-driven execution, or unnecessary abstractions.
 - Prefer the smallest design that preserves the locked architecture.
 - Do not edit production code.
+- Follow docs/AI_ROUTING.md for quota-aware routing intent.
 
 Output:
 1. Goal and scope.
