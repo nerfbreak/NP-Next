@@ -198,7 +198,13 @@ Quantity column
 -> if not found, fallback to zero-based index 71
 ```
 
-Dropdown overrides remain available. Priority is `user override > distributor stock_import_mapping JSONB > global default`. Snapshot the final mapping in the run.
+Dropdown overrides remain available. Priority:
+
+```text
+user override > distributor stock_import_mapping JSONB > global default
+```
+
+Snapshot the final mapping in the run.
 
 ### INVT_MASTER
 
