@@ -1,6 +1,8 @@
 ---
 description: QA specialist for NP-Next acceptance, regression, integration, worker, and end-to-end verification.
 mode: subagent
+permission:
+  edit: deny
 ---
 
 # QA Agent
