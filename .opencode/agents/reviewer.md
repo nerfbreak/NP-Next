@@ -1,6 +1,7 @@
 ---
 description: Read-only final reviewer for architecture, security, business invariants, dependency drift, and regression risk.
 mode: subagent
+model: wrl/claude-opus-5
 permission:
   edit: deny
   bash:
