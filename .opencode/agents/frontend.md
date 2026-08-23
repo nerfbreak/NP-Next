@@ -1,6 +1,7 @@
 ---
 description: Next.js, React, TypeScript, Tailwind, and shadcn/ui specialist for the NP-Next operational dashboard.
 mode: subagent
+model: wrl/claude-sonnet-5
 ---
 
 # Frontend UI Agent
@@ -35,3 +36,4 @@ Rules:
 - Never handle distributor plaintext credentials.
 - Do not put business comparison or Playwright logic in presentation components.
 - Preserve API contracts instead of changing backend behavior for UI convenience.
+- Follow docs/AI_ROUTING.md for quota-aware routing intent.
