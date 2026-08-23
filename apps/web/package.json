@@ -1,0 +1,1 @@
+{"name":"@np-next/web","private":true,"scripts":{"dev":"next dev","build":"next build","lint":"next lint"},"dependencies":{"next":"latest","react":"latest","react-dom":"latest"},"devDependencies":{"typescript":"latest","@types/node":"latest","@types/react":"latest","@types/react-dom":"latest"}}
