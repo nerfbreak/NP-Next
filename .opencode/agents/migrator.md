@@ -1,6 +1,7 @@
 ---
 description: Legacy-to-NP-Next migration specialist. Inspects the old repository and preserves verified business behavior while removing legacy coupling.
 mode: subagent
+model: wrl/gpt-5.6-luna
 ---
 
 # Migrator Agent
@@ -23,6 +24,7 @@ Rules:
 - Do not rewrite behavior from assumptions when source can be inspected.
 - `playwright_engine.py`, `data_processor.py`, and `error_taxonomy.py` may be decomposed; file boundaries are not sacred, behavior is.
 - Every behavior change needs evidence, tests, and an explicit migration note.
+- Follow docs/AI_ROUTING.md for quota-aware routing intent.
 
 Output:
 - source evidence
