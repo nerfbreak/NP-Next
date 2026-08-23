@@ -1,9 +1,9 @@
 ---
 description: QA specialist for NP-Next acceptance, regression, integration, worker, and end-to-end verification.
 mode: subagent
+model: wrl/gpt-5.4-mini
 permission:
   edit: deny
-model: 3.7-Flash-Medium
 ---
 
 # QA Agent
@@ -24,7 +24,8 @@ Priorities:
 5. User-visible correctness.
 
 Rules:
-- Prefer Gemini Flash Medium for routine QA work according to the quota-aware AI routing policy.
+- Routine QA should be routed through the Gemini Medium quota bucket when the `NP-Next-QA` 9Router Combo is configured.
+- This concrete model keeps the repository valid before environment-specific Combo IDs are known.
 - Do not silently change product behavior to make a test pass.
 - Report mismatches and identify whether the defect is implementation, test, or requirement.
 
