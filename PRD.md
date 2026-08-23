@@ -1,8 +1,8 @@
 # NP-Next Product Requirements Document
 
-NP-Next is the native fullstack successor to the legacy `newspage_automation` project. It automates Newspage/distributor workflows for an operations team and provides a shared dashboard for active work, distributor availability, worker capacity, execution progress, and history.
+NP-Next is the native fullstack successor to `newspage_automation`. It automates Newspage/distributor workflows for an operations team and provides a shared dashboard for active work, distributor availability, worker capacity, execution progress, and history.
 
-Streamlit is reference-only and is not part of the target product.
+Streamlit is reference-only and not part of the target product.
 
 ## Goals
 
@@ -26,16 +26,15 @@ Manage users, distributors, global settings, SKU rules, multiplier rules, worker
 ### OPERATOR
 Run supported workflows, view dashboard/tasks/workers, and cancel their own tasks. Cannot manage users, credentials, global rules, or another user's task.
 
-## Target Architecture
+## Architecture
 
 ```text
 Next.js + TypeScript
         |
       HTTP/SSE
         v
-FastAPI
-   |        \
-   |         +--> Supabase PostgreSQL
+FastAPI -----> Supabase PostgreSQL
+   |
    v
 ARQ + Redis
    |
@@ -46,48 +45,41 @@ Python Playwright Workers
 Newspage / SharePoint / external systems
 ```
 
-- Next.js: UI, forms, uploads, dashboard, realtime display.
-- FastAPI: auth/RBAC, validation, orchestration, locks, runs, audit, SSE, ARQ control.
-- ARQ/Redis: queue transport only. No scheduler.
-- Workers: actual automation, heartbeat, events, cleanup.
-- Supabase: persistent business state and configuration.
+Next.js owns UI/forms/uploads/dashboard/realtime display. FastAPI owns auth/RBAC, validation, orchestration, locks, runs, audit, SSE, and ARQ control. ARQ/Redis is queue transport only. Workers own real automation, heartbeat, events, and cleanup. Supabase is persistent business state.
 
 ## Distributor Management
 
-Superuser manages distributors from the application. Operators do not need to use the Supabase dashboard.
-
-Distributor fields:
+Superuser manages distributors from the application. Operators do not need the Supabase dashboard.
 
 ```text
-id
-name
-code
-username
-encrypted_password
-warehouse
-stock_import_mapping JSONB NULL
-is_active
-created_by
-updated_by
-created_at
-updated_at
+distributors
+├── id
+├── name
+├── code
+├── username
+├── encrypted_password
+├── warehouse
+├── stock_import_mapping JSONB NULL
+├── is_active
+├── created_by
+├── updated_by
+├── created_at
+└── updated_at
 ```
 
-All distributors share the same Newspage login URL, stored globally in system settings. `base_url` is not a distributor field.
+All distributors share one Newspage login URL stored globally. `base_url` is not a distributor field. `warehouse` belongs to the distributor and is the source of truth for warehouse filtering. Disabled distributors cannot start new tasks.
 
-`warehouse` belongs to the distributor and is the source of truth for warehouse filtering/selection. Disabled distributors cannot start new tasks. The distributor fleet is 95+ and growing, so selectors must be searchable.
+There are 95+ distributors and the number may grow, so selectors must be searchable.
 
 ## Distributor Concurrency
 
-Locking is per distributor, not global and not per user. Active states are `queued`, `running`, and `cancelling`.
+Locking is per distributor, not global and not per user. Active run states are `queued`, `running`, and `cancelling`.
 
-A distributor can have at most one active run. Different distributors can run concurrently.
-
-The backend must enforce the lock regardless of frontend state. PostgreSQL is authoritative through a partial unique index. Frontend disables Run for the locked distributor and shows who is using it; other distributors stay runnable.
+One distributor may have at most one active run. Different distributors can run concurrently. PostgreSQL enforces the lock; the frontend also reflects it.
 
 ## Dashboard and Workers
 
-Dashboard must show total/standby/busy/offline workers, active/queued runs, locked/available distributors, current user/workflow/worker, current step, progress, duration, and recent runs. Updates do not require full-page refresh.
+Dashboard shows total/standby/busy/offline workers, active/queued runs, locked/available distributors, current user/workflow/worker, current step, progress, duration, and recent runs. Updates do not require full-page refresh.
 
 Worker states:
 
@@ -206,15 +198,21 @@ Quantity column
 -> if not found, fallback to zero-based index 71
 ```
 
-Dropdown mapping remains available. Priority is `user override > distributor stock_import_mapping JSONB > global default`. The final mapping used by a run must be snapshotted.
+Dropdown overrides remain available. Priority:
+
+```text
+user override > distributor stock_import_mapping JSONB > global default
+```
+
+Snapshot the final mapping in the run.
 
 ### INVT_MASTER
 
-`INVT_MASTER` is a fixed Newspage integration contract. Operators do not map its columns manually. Format changes are integration changes.
+`INVT_MASTER` is a fixed Newspage integration contract. Operators do not map its columns manually. A format change is an integration change.
 
 ### SKU leading-zero rules
 
-These global rules exist because Excel can drop leading zeroes:
+These global rules exist because Excel can remove leading zeroes:
 
 ```text
 135428
@@ -246,7 +244,7 @@ These global rules exist because Excel can drop leading zeroes:
 373112
 ```
 
-Each rule prepends exactly one `0`:
+Each rule prepends exactly one zero:
 
 ```text
 135428 -> 0135428
@@ -255,11 +253,11 @@ Each rule prepends exactly one `0`:
 373112 -> 0373112
 ```
 
-`8021803` and `8021804` are not hardcoded exceptions.
+`8021803` and `8021804` are normal SKUs with no hardcoded exception list.
 
 ### Multiplier rules
 
-Multipliers are scoped by `distributor_id + sku`, with at most one active rule per pair. The multiplier is applied to distributor quantity before aggregation/comparison.
+Multipliers are scoped by `distributor_id + sku`, one active rule per pair. Apply the multiplier to distributor quantity before aggregation/comparison.
 
 ### Warehouse and comparison
 
@@ -278,7 +276,7 @@ Newspage 100, Distributor 80  -> -20
 Newspage 100, Distributor 120 -> +20
 ```
 
-`Selisih` becomes the adjustment quantity for execution. Review UI must show at minimum SKU, Newspage Qty, Distributor Qty, Multiplier, Selisih, and Status. Execution is a separate explicit action after review.
+`Selisih` becomes adjustment quantity for execution. Review UI must show at least SKU, Newspage Qty, Distributor Qty, Multiplier, Selisih, Status.
 
 ## Other Workflows
 
@@ -290,7 +288,7 @@ Migrate using the same architecture:
 - Clearance Stock
 - Initial Stock
 
-Verified legacy behavior is preserved unless an explicit product decision changes it.
+Preserve verified legacy behavior unless explicitly changed.
 
 ## Security
 
@@ -298,7 +296,7 @@ Verified legacy behavior is preserved unless an explicit product decision change
 - Never return plaintext credentials after storage.
 - Never place credentials in ARQ payloads, logs, or SSE events.
 - Server/service credentials stay server-side.
-- Sensitive tables are not broadly writable from the browser.
+- Sensitive operational tables are not broadly writable from the browser.
 - Administrative/config changes are audited.
 
 ## Database
@@ -348,15 +346,15 @@ Detailed contracts live in `docs/API.md`.
 
 ## ARQ
 
-Jobs are manually triggered. No scheduler. Payloads use a `run_id`, not credentials:
+Jobs are manual. No scheduler. Use a `run_id`, never credentials:
 
 ```python
 await redis.enqueue_job("run_inventory_adjustment", run_id)
 ```
 
-The worker loads run/distributor configuration server-side. Use ARQ abort/cancellation plus explicit Playwright cleanup. Do not blindly auto-retry inventory mutation after partial execution.
+Worker loads run/distributor configuration server-side. Use ARQ abort/cancellation plus explicit Playwright cleanup. Do not blindly auto-retry inventory mutation after partial execution.
 
-## Testing and invariants
+## Testing and Invariants
 
 Required layers:
 
@@ -378,20 +376,17 @@ Critical invariants:
 5. Credentials never appear in logs/events/job payloads.
 6. Multiplier happens before comparison.
 7. `Selisih = Distributor - Newspage`.
-8. SKU leading-zero rules prepend exactly one zero.
+8. Leading-zero rules prepend exactly one zero.
 9. `8021803` and `8021804` are not hardcoded exclusions.
-10. INVT_MASTER remains a fixed contract.
-11. Distributor warehouse comes from distributor configuration.
+10. INVT_MASTER remains fixed.
+11. Distributor warehouse comes from distributor config.
 12. Default Excel mapping remains legacy-compatible.
 
 ## Migration Strategy
 
 ```text
-nerfbreak/newspage_automation
-= legacy reference only
-
-nerfbreak/NP-Next
-= new project source of truth
+nerfbreak/newspage_automation = legacy reference only
+nerfbreak/NP-Next = new project source of truth
 ```
 
 Order:
@@ -429,7 +424,7 @@ Streamlit routing
 Streamlit auth/session handling
 ```
 
-The final product has zero runtime dependency on Streamlit.
+Final product has zero runtime dependency on Streamlit.
 
 ## Definition of Done
 
@@ -439,20 +434,20 @@ Automation work also requires verified worker execution, heartbeat, cancellation
 
 ## Acceptance Criteria
 
-- **AC-001 Native frontend:** Clean NP-Next uses Next.js + FastAPI; Streamlit is not required.
-- **AC-002 Distributor lock:** If Distributor A is running under Budi, Sinta cannot start A but can start B.
-- **AC-003 Dashboard visibility:** If Budi runs A, dashboard shows A locked and identifies Budi/workflow while other distributors remain available.
-- **AC-004 Worker visibility:** Dashboard accurately shows worker standby/busy/offline state and assignments.
-- **AC-005 Manual jobs:** No business automation runs without an explicit product-defined trigger.
-- **AC-006 Excel defaults:** Legacy-format files default to SKU index 20 and quantity `StokAkhir`, fallback index 71.
-- **AC-007 Mapping override:** Operators can override SKU/quantity/warehouse/active columns via dropdowns.
-- **AC-008 SKU normalization:** `135428 -> 0135428`, `22583 -> 022583`, and `8021803` remains `8021803` without a special exclusion.
-- **AC-009 Multiplier:** Raw quantity 50 with multiplier 2 becomes comparison quantity 100 before comparison.
-- **AC-010 Comparison:** Newspage 100 and Distributor 80 produces `Selisih = -20` and adjustment quantity -20.
-- **AC-011 Cancellation:** Authorized cancellation moves through `cancelling`, aborts ARQ, terminates Playwright, persists `cancelled`, then releases the lock.
-- **AC-012 Credential safety:** Plaintext credentials never appear in ARQ payloads, logs, SSE events, or frontend responses after storage.
-- **AC-013 Reproducibility:** A run stores parser/timeout/retry snapshots.
-- **AC-014 Audit:** Administrative configuration changes record actor, action, entity, and timestamp.
+- **AC-001:** Clean NP-Next uses Next.js + FastAPI; Streamlit is not required.
+- **AC-002:** If Distributor A is running under Budi, Sinta cannot start A but can start B.
+- **AC-003:** Dashboard shows locked distributor, current user/workflow, and other available distributors.
+- **AC-004:** Dashboard accurately shows worker standby/busy/offline state and assignments.
+- **AC-005:** No business automation runs without an explicit trigger.
+- **AC-006:** Legacy-format files default to SKU index 20 and quantity `StokAkhir`, fallback index 71.
+- **AC-007:** Operators can override mapping columns via dropdowns.
+- **AC-008:** `135428 -> 0135428`, `22583 -> 022583`, and `8021803` remains `8021803` without a special exclusion.
+- **AC-009:** Raw quantity 50 with multiplier 2 becomes comparison quantity 100 before comparison.
+- **AC-010:** Newspage 100 and Distributor 80 produces `Selisih = -20` and adjustment quantity -20.
+- **AC-011:** Authorized cancellation goes through `cancelling`, aborts ARQ, terminates Playwright, persists `cancelled`, then releases the lock.
+- **AC-012:** Plaintext credentials never appear in ARQ payloads, logs, SSE events, or frontend responses after storage.
+- **AC-013:** A run stores parser/timeout/retry snapshots.
+- **AC-014:** Administrative configuration changes record actor, action, entity, and timestamp.
 
 ## Locked Decisions
 
