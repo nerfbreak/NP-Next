@@ -1,6 +1,6 @@
 # NP-Next Product Requirements Document
 
-NP-Next is the native fullstack successor to `newspage_automation`. It automates Newspage/distributor workflows for an operations team and provides a shared dashboard for active work, distributor availability, worker capacity, execution progress, and history.
+NP-Next is the native fullstack successor to the legacy `newspage_automation` project. It automates Newspage/distributor workflows for an operations team and provides a shared dashboard for active work, distributor availability, worker capacity, execution progress, and history.
 
 Streamlit is reference-only and not part of the target product.
 
@@ -26,7 +26,7 @@ Manage users, distributors, global settings, SKU rules, multiplier rules, worker
 ### OPERATOR
 Run supported workflows, view dashboard/tasks/workers, and cancel their own tasks. Cannot manage users, credentials, global rules, or another user's task.
 
-## Architecture
+## Target Architecture
 
 ```text
 Next.js + TypeScript
@@ -198,13 +198,7 @@ Quantity column
 -> if not found, fallback to zero-based index 71
 ```
 
-Dropdown overrides remain available. Priority:
-
-```text
-user override > distributor stock_import_mapping JSONB > global default
-```
-
-Snapshot the final mapping in the run.
+Dropdown overrides remain available. Priority is `user override > distributor stock_import_mapping JSONB > global default`. Snapshot the final mapping in the run.
 
 ### INVT_MASTER
 
