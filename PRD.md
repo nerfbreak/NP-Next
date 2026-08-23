@@ -1,47 +1,38 @@
 # NP-Next Product Requirements Document
 
-## 1. Product
+NP-Next is the native fullstack successor to the legacy `newspage_automation` project. It automates Newspage/distributor workflows for an operations team and provides a shared dashboard for active work, distributor availability, worker capacity, execution progress, and history.
 
-NP-Next is the native fullstack successor to `newspage_automation`. It automates Newspage/distributor workflows for an operations team and provides a shared operational dashboard.
+Streamlit is reference-only and is not part of the target product.
 
-Legacy Streamlit is reference-only. Streamlit is not part of the target system and must be removed completely.
+## Goals
 
-## 2. Goals
-
-- Native Next.js frontend.
+- Native Next.js + TypeScript frontend.
 - FastAPI backend.
 - Python + Playwright automation workers.
 - ARQ + Redis for manually triggered background jobs.
 - Supabase PostgreSQL as persistent source of truth.
-- Shared dashboard for team activity and worker capacity.
+- Shared dashboard with active tasks and worker state.
 - Per-distributor concurrency locking.
-- Real cancellation that stops the automation worker/browser.
+- Real task cancellation that terminates automation resources.
 - Superuser-managed distributor configuration.
 - Observable, auditable, recoverable executions.
-- Preserve verified legacy business behavior unless explicitly changed.
+- Preserve verified legacy behavior unless explicitly changed.
 
-## 3. Non-goals
+## Non-goals
 
-Do not introduce:
+Do not introduce Streamlit, Celery, scheduler/beat/cron business workflows, direct frontend access to credentials, or hardcoded distributor/warehouse/multiplier/SKU exceptions.
 
-- Streamlit.
-- Celery.
-- Scheduler/beat/cron-based business workflows.
-- Direct frontend access to distributor credentials.
-- Hardcoded distributor credentials, warehouse names, multiplier rules, or SKU exceptions.
-- Blind rewrites that change verified automation behavior.
-
-## 4. Roles
+## Roles
 
 ### SUPERUSER
 
-The owner/admin role. Can manage users, distributors, global settings, SKU rules, multiplier rules, workers, audit logs, execution history, and any task.
+Manage users, distributors, global settings, SKU rules, multiplier rules, workers, audit logs, execution history, and any task.
 
 ### OPERATOR
 
-Can sign in, run workflows, view dashboard/tasks/workers, and cancel their own tasks. Cannot manage users, credentials, global rules, or other users' tasks.
+Run supported workflows, view dashboard/tasks/workers, and cancel their own tasks. Operators cannot manage users, credentials, global rules, or another user's task.
 
-## 5. Target Architecture
+## Target Architecture
 
 ```text
 Next.js + TypeScript
@@ -61,32 +52,19 @@ Python Playwright Workers
 Newspage / SharePoint / external systems
 ```
 
-Responsibilities:
-
-- Next.js: UI, auth UI, forms, uploads, dashboard, realtime display.
-- FastAPI: auth enforcement, RBAC, validation, orchestration, locks, runs, audit, SSE, ARQ control.
-- ARQ/Redis: queue and job transport only. No scheduler required.
-- Workers: actual Playwright automation, heartbeat, events, cleanup.
+- Next.js: UI, forms, uploads, dashboard, realtime display.
+- FastAPI: auth/RBAC, validation, orchestration, locks, runs, audit, SSE, ARQ control.
+- ARQ/Redis: queue transport only. No scheduler.
+- Workers: actual automation, heartbeat, events, cleanup.
 - Supabase: persistent business state and configuration.
 
-## 6. Authentication
+## Authentication
 
-Use Supabase Auth for identity.
+Use Supabase Auth for identity. Application profiles live in `profiles` with `role = superuser | operator` and `is_active`.
 
-Application profile is stored in `profiles`:
+## Distributor Management
 
-```text
-id
-full_name
-role = superuser | operator
-is_active
-```
-
-Credentials must never be exposed to the browser after storage.
-
-## 7. Distributor Management
-
-Superuser manages distributors from the application UI. Operators do not need to use the Supabase dashboard.
+Superuser manages distributors from the application. Operators do not need to use the Supabase dashboard.
 
 Distributor fields:
 
@@ -105,29 +83,15 @@ created_at
 updated_at
 ```
 
-All distributors share the same Newspage login URL, stored globally in system settings. `base_url` is not a distributor field.
+All distributors share the same Newspage login URL, stored globally in system settings. `base_url` is not a distributor field. `warehouse` belongs to the distributor and is the source of truth for warehouse filtering/selection.
 
-`warehouse` belongs to the distributor. It is the source of truth for warehouse selection/filtering in workflows.
+Disabled distributors cannot start new tasks. The distributor fleet is 95+ and growing, so selectors must be searchable.
 
-A disabled distributor cannot start new tasks.
+## Distributor Concurrency
 
-There may be 95+ distributors, so distributor selectors must support search.
+Locking is per distributor, not global and not per user. Active states are `queued`, `running`, and `cancelling`.
 
-## 8. Distributor Concurrency
-
-Locking is per distributor, not per user and not global.
-
-Active run states are:
-
-```text
-queued
-running
-cancelling
-```
-
-One distributor may have at most one active run.
-
-Example:
+A distributor can have at most one active run. Different distributors can run concurrently.
 
 ```text
 Distributor A -> Budi -> running
@@ -135,34 +99,26 @@ Distributor B -> Sinta -> running
 Distributor C -> available
 ```
 
-The backend must reject any second active run for the same distributor regardless of frontend state. PostgreSQL enforces this with a partial unique index.
+Backend must enforce the lock regardless of frontend state. PostgreSQL is authoritative through a partial unique index. Frontend disables Run for the locked distributor and shows who is using it; other distributors stay runnable.
 
-Frontend must disable the Run action for a locked distributor and show who is using it. Other distributors remain runnable.
+## Dashboard
 
-## 9. Dashboard
+The dashboard must show:
 
-The dashboard is the shared operational control center.
-
-Show:
-
-- total workers
-- standby workers
-- busy workers
-- offline/error workers
+- total/standby/busy/offline workers
 - active/queued runs
-- active/locked distributors
-- available distributors
+- locked/available distributors
 - user running each task
 - workflow type
 - worker assignment
 - current step
 - progress
 - start time/duration
-- recent runs
+- recent execution history
 
-Dashboard must update without full-page refresh.
+Updates must work without full-page refresh.
 
-## 10. Worker Management
+## Worker Management
 
 Worker states:
 
@@ -175,117 +131,70 @@ offline
 error
 ```
 
-One worker handles one active automation in the initial architecture.
-
-Worker records include heartbeat and current run/distributor.
+One worker handles one active automation initially.
 
 Baseline heartbeat:
 
 ```text
-interval: 15 seconds
-stale threshold: 180 seconds
+interval = 15 seconds
+stale threshold = 180 seconds
 ```
 
-These values are configurable.
+These are configurable. Worker failure must not leave a distributor locked forever.
 
-Worker failure must not permanently lock a distributor.
+Worker capacity may scale dynamically with queue pressure. Infrastructure, not the application, provisions/removes workers.
 
-Worker capacity may be scaled dynamically based on queue pressure. Infrastructure is responsible for creating/removing worker processes/containers.
-
-## 11. Automation Run Lifecycle
+## Automation Run Lifecycle
 
 ```text
-queued
-  |
-  v
-running
-  | \
-  |  +--> completed
-  |  +--> failed
-  |  +--> stale
-  v
-cancelling
-  |
-  v
-cancelled
+queued -> running -> completed
+                   -> failed
+                   -> stale
+        -> cancelling -> cancelled
 ```
 
-`automation_runs` stores at minimum:
+A run stores workflow, distributor, requester, worker, current step, progress, heartbeats, parser snapshot, timeout snapshot, retry snapshot, result summary, errors, and timestamps.
 
-- workflow type
-- distributor
-- requested_by
-- worker
-- status
-- current step
-- progress
-- heartbeats
-- parser config snapshot
-- timeout snapshot
-- retry snapshot
-- result summary
-- errors
-- timestamps
+Configuration snapshots are required for reproducibility.
 
-Snapshots are required so historical runs remain reproducible after configuration changes.
+## Task Cancellation
 
-## 12. Task Cancellation
-
-Cancellation must terminate real execution, not only update a database row.
+Cancellation is real execution cancellation:
 
 ```text
 Cancel request
-  -> verify permission
+  -> permission check
   -> run = cancelling
   -> abort ARQ job
   -> cancel worker coroutine
   -> close/terminate Playwright browser/context/processes
-  -> persist run = cancelled
+  -> run = cancelled
   -> release distributor lock
   -> worker = standby
 ```
 
-The lock is not released until the worker has actually stopped.
+The lock is not released until execution has actually stopped. Operators cancel their own tasks; Superuser can cancel any task. Cancelled runs remain in history/audit data.
 
-Operators may cancel their own tasks. Superuser may cancel any task.
+## Adaptive Timeout
 
-Cancelled runs remain in history/audit data.
+Timeout is dynamic. Separate navigation, action, and overall-job limits exist.
 
-## 13. Adaptive Timeout
+Timeout may extend when heartbeat is healthy, progress is being made, a known long-running step is active, or transient network retries are occurring. A configurable hard maximum remains as a safety ceiling.
 
-Timeout is dynamic rather than one fixed duration.
-
-Layers:
-
-- navigation timeout
-- element/action timeout
-- overall job timeout
-
-Timeout may extend while:
-
-- heartbeat is healthy
-- progress is being made
-- a known long-running step is active
-- transient network retry/backoff is occurring
-
-A configurable hard maximum remains as a safety ceiling.
-
-Baseline configuration may start near:
+Initial baselines may be:
 
 ```text
 navigation: 60s
-avigation max: 180s
+navigation max: 180s
 action: 30s
 action max: 60s
 overall baseline: 30m
 overall max: several hours
 ```
 
-Exact values are settings, not business invariants.
+Exact values are settings. ARQ infrastructure timeout is a safety ceiling, not the only business timeout mechanism.
 
-ARQ infrastructure timeout is a safety ceiling, not the only business timeout mechanism.
-
-## 14. Realtime
+## Realtime
 
 Use SSE initially.
 
@@ -318,7 +227,7 @@ distributor.locked
 distributor.unlocked
 ```
 
-## 15. Inventory Adjustment
+## Inventory Adjustment
 
 Inventory Adjustment is the first migration vertical slice.
 
@@ -326,28 +235,28 @@ Canonical flow:
 
 ```text
 Select Distributor
-   -> Upload Distributor Stock Excel
-   -> Load distributor config
-   -> Load parser defaults/override
-   -> Detect mapping
-   -> Show mapping dropdowns
-   -> Optional user override
-   -> Parse distributor stock
-   -> Parse fixed INVT_MASTER
-   -> Normalize SKU
-   -> Filter distributor warehouse
-   -> Apply distributor multiplier
-   -> Aggregate
-   -> Compare
-   -> Review
-   -> Create run
-   -> ARQ
-   -> Playwright worker
+ -> Upload Distributor Stock Excel
+ -> Load distributor config
+ -> Load parser defaults/override
+ -> Detect mapping
+ -> Show mapping dropdowns
+ -> Optional user override
+ -> Parse distributor stock
+ -> Parse fixed INVT_MASTER
+ -> Normalize SKU
+ -> Filter distributor warehouse
+ -> Apply distributor multiplier
+ -> Aggregate
+ -> Compare
+ -> Review
+ -> Create run
+ -> ARQ
+ -> Playwright worker
 ```
 
-### 15.1 Distributor Excel Defaults
+### Distributor Excel defaults
 
-Preserve the legacy default behavior:
+Preserve legacy behavior:
 
 ```text
 SKU column
@@ -358,31 +267,21 @@ Quantity column
 -> if not found, fallback to zero-based index 71
 ```
 
-The UI must still expose column dropdowns so operators can override the defaults.
-
-Mapping priority:
+Dropdown mapping remains available. Priority is:
 
 ```text
-user override
-    >
-distributor stock_import_mapping JSONB override
-    >
-global default
+user override > distributor stock_import_mapping JSONB > global default
 ```
 
-The final mapping used by a run must be snapshotted in `automation_runs`.
+The final mapping used by a run must be snapshotted.
 
-### 15.2 INVT_MASTER
+### INVT_MASTER
 
-`INVT_MASTER` is a fixed Newspage integration contract. Operators do not map its columns manually.
+`INVT_MASTER` is a fixed Newspage integration contract. Operators do not map its columns manually. Format changes are integration changes.
 
-Changes to its format are integration changes and must be handled in the parser deliberately.
+### SKU leading-zero rules
 
-### 15.3 SKU Leading-Zero Rules
-
-Global rules exist because Excel can drop leading zeroes.
-
-Current rules:
+Global rules exist because Excel may drop leading zeroes. Current rules:
 
 ```text
 135428
@@ -414,9 +313,7 @@ Current rules:
 373112
 ```
 
-Each rule means prepend exactly one `0` during normalization.
-
-Examples:
+Each rule prepends exactly one `0`:
 
 ```text
 135428 -> 0135428
@@ -425,46 +322,17 @@ Examples:
 373112 -> 0373112
 ```
 
-There is no hardcoded exception list for:
+`8021803` and `8021804` are not hardcoded exceptions.
 
-```text
-8021803
-8021804
-```
+### Multiplier rules
 
-They remain normal unless a future explicit rule says otherwise.
+Multipliers are scoped by `distributor_id + sku`, with at most one active rule per pair. The multiplier is applied to distributor quantity before aggregation/comparison.
 
-### 15.4 Multiplier Rules
+### Warehouse
 
-Multipliers are scoped to a distributor:
+Use `distributors.warehouse`. Do not hardcode `GOOD_WHS`, `GUDANG UTAMA`, or legacy distributor exception mappings.
 
-```text
-distributor_id + sku
-```
-
-Maximum one active rule per distributor/SKU pair.
-
-Multiplier is applied to distributor quantity before aggregation/comparison.
-
-Example:
-
-```text
-raw distributor qty = 50
-multiplier = 2
-comparison qty = 100
-```
-
-### 15.5 Warehouse
-
-The warehouse is loaded from `distributors.warehouse`.
-
-Do not hardcode:
-
-- `GOOD_WHS`
-- `GUDANG UTAMA`
-- legacy distributor exception mappings
-
-### 15.6 Comparison
+### Comparison
 
 Canonical formula:
 
@@ -475,17 +343,15 @@ Selisih = Distributor - Newspage
 Examples:
 
 ```text
-Newspage 100, Distributor 80  -> Selisih -20
-Newspage 100, Distributor 120 -> Selisih +20
+Newspage 100, Distributor 80  -> -20
+Newspage 100, Distributor 120 -> +20
 ```
 
-`Selisih` becomes the adjustment quantity sent to execution.
+`Selisih` becomes the adjustment quantity for execution.
 
-Only valid mismatches are eligible for execution.
+### Review UI
 
-### 15.7 Review UI
-
-Minimum columns:
+At minimum show:
 
 ```text
 SKU
@@ -498,9 +364,9 @@ Status
 
 Execution is a separate explicit action after review.
 
-## 16. Other Workflows
+## Other Workflows
 
-Existing workflow domains to migrate using the same execution architecture:
+Migrate using the same architecture:
 
 - Sales Extraction
 - Promotion Comparison
@@ -508,21 +374,20 @@ Existing workflow domains to migrate using the same execution architecture:
 - Clearance Stock
 - Initial Stock
 
-Each must preserve verified legacy behavior until an explicit product decision changes it.
+Verified legacy behavior is preserved unless an explicit product decision changes it.
 
-## 17. Security
+## Security
 
-- Distributor credentials are encrypted at rest.
-- Plaintext credentials are never returned after save.
-- Credentials never appear in ARQ payloads.
-- Credentials never appear in logs or SSE events.
-- Server/service credentials never belong in the frontend.
-- Sensitive operational tables must not be broadly writable from the browser.
-- Configuration and administrative changes are audited.
+- Encrypt distributor credentials at rest.
+- Never return plaintext credentials after storage.
+- Never place credentials in ARQ payloads, logs, or SSE events.
+- Server/service credentials stay server-side.
+- Sensitive tables are not broadly writable from the browser.
+- Administrative/config changes are audited.
 
-## 18. Database
+## Database
 
-Target core tables:
+Core tables:
 
 ```text
 profiles
@@ -538,24 +403,11 @@ automation_run_artifacts
 audit_logs
 ```
 
-PostgreSQL is the source of truth. Redis is queue/execution transport, not permanent business state.
+PostgreSQL is the source of truth. Redis is queue/execution transport.
 
-## 19. Audit
+## API
 
-Audit at minimum:
-
-- distributor create/update/enable/disable
-- user/role changes
-- SKU rule changes
-- multiplier rule changes
-- global setting changes
-- task start/cancel/failure where relevant
-
-Audit records should include actor, action, entity, before/after where appropriate, and timestamp.
-
-## 20. API Expectations
-
-Core endpoints follow these patterns:
+Core patterns:
 
 ```text
 GET  /api/v1/me
@@ -564,40 +416,35 @@ GET  /api/v1/dashboard/active-runs
 GET  /api/v1/dashboard/workers
 GET  /api/v1/distributors?q=...
 GET  /api/v1/distributors/{id}
-
 POST /api/v1/admin/distributors
 PATCH /api/v1/admin/distributors/{id}
 POST /api/v1/admin/distributors/{id}/enable
 POST /api/v1/admin/distributors/{id}/disable
-
 POST /api/v1/inventory/preview
 GET  /api/v1/inventory/previews/{id}
 POST /api/v1/inventory/runs
-
 GET  /api/v1/runs/{id}
 POST /api/v1/runs/{id}/cancel
 GET  /api/v1/runs/{id}/events
 ```
 
-The exact API contract lives in `docs/API.md`.
+Detailed contracts live in `docs/API.md`.
 
-## 21. ARQ Contract
+## ARQ
 
-Jobs are triggered manually through the API.
+Jobs are manually triggered. No scheduler.
 
-ARQ payload should be minimal and contain a run identifier, not credentials:
+Job payloads use a `run_id`, not credentials:
 
 ```python
 await redis.enqueue_job("run_inventory_adjustment", run_id)
 ```
 
-Worker loads the run and distributor configuration server-side.
+The worker loads run and distributor configuration server-side. Use ARQ abort/cancellation plus explicit Playwright cleanup.
 
-Use ARQ abort/cancellation plus explicit Playwright cleanup.
+Do not blindly auto-retry inventory mutation after partial execution.
 
-Do not implement automatic retry of inventory mutations blindly. A partial stock adjustment must be recoverable by state inspection, not duplicated by a blind re-run.
-
-## 22. Testing
+## Testing
 
 Required layers:
 
@@ -615,7 +462,7 @@ Critical invariants:
 1. One distributor has at most one active run.
 2. Different distributors may run concurrently.
 3. One worker handles one active automation initially.
-4. Cancellation stops the actual automation resources.
+4. Cancellation stops actual automation resources.
 5. Credentials never appear in logs/events/job payloads.
 6. Multiplier happens before comparison.
 7. `Selisih = Distributor - Newspage`.
@@ -623,11 +470,9 @@ Critical invariants:
 9. `8021803` and `8021804` are not hardcoded exclusions.
 10. INVT_MASTER remains a fixed contract.
 11. Distributor warehouse comes from distributor configuration.
-12. Default distributor Excel mapping stays compatible with the legacy behavior.
+12. Default Excel mapping remains legacy-compatible.
 
-## 23. Migration Strategy
-
-Repository roles:
+## Migration Strategy
 
 ```text
 nerfbreak/newspage_automation
@@ -637,7 +482,7 @@ nerfbreak/NP-Next
 = new project source of truth
 ```
 
-Migration order:
+Order:
 
 ```text
 1. Supabase schema
@@ -650,15 +495,15 @@ Migration order:
 8. Dashboard + SSE
 9. Hard cancellation + recovery
 10. Security/audit hardening
-11. Remove remaining legacy dependencies
+11. Legacy cleanup
 12. Remove Streamlit completely
 ```
 
-Legacy automation files such as `playwright_engine.py`, `data_processor.py`, and `error_taxonomy.py` may be directly refactored and decomposed. Protect verified behavior, not file boundaries.
+`playwright_engine.py`, `data_processor.py`, and `error_taxonomy.py` may be directly refactored/decomposed. Protect verified behavior, not file boundaries.
 
-## 24. Native Fullstack Rule
+## Native Fullstack Rule
 
-No new code may import or depend on Streamlit.
+New code must not import or depend on Streamlit.
 
 Forbidden:
 
@@ -672,56 +517,47 @@ Streamlit routing
 Streamlit auth/session handling
 ```
 
-The final product must have zero runtime dependency on Streamlit.
+The final product has zero runtime dependency on Streamlit.
 
-## 25. Definition of Done
+## Definition of Done
 
-A feature is done when:
+A feature is done when the PRD is satisfied, tests pass, business invariants are covered, security is respected, state is persisted correctly, required realtime/audit behavior exists, documentation/contracts are updated, and no forbidden Streamlit dependency is introduced.
 
-- implementation satisfies the PRD
-- tests pass
-- relevant business invariants are covered
-- security requirements are respected
-- run/worker state is persisted correctly
-- realtime/audit behavior exists where required
-- documentation/contracts are updated when behavior changes
-- no forbidden Streamlit dependency is introduced
+Automation features also require worker execution, heartbeat, cancellation, distributor locking, persistence, and failure-path verification.
 
-For automation work, done also means worker execution, heartbeat, cancellation, distributor locking, persistence, and failure paths are verified.
-
-## 26. Acceptance Criteria
+## Acceptance Criteria
 
 ### AC-001 Native frontend
 
-Given a clean NP-Next checkout, the application uses Next.js for the frontend and FastAPI for the API. Streamlit is not required.
+A clean NP-Next checkout uses Next.js for the frontend and FastAPI for the API. Streamlit is not required.
 
 ### AC-002 Distributor lock
 
-Given Distributor A is running under Budi, Sinta cannot start Distributor A, but Sinta can start Distributor B.
+If Distributor A is running under Budi, Sinta cannot start Distributor A but can start Distributor B.
 
 ### AC-003 Dashboard visibility
 
-Given Budi is running Distributor A, the dashboard shows Distributor A as locked, identifies Budi/workflow, and keeps other distributors available.
+If Budi runs Distributor A, the dashboard shows it as locked, identifies Budi/workflow, and keeps other distributors available.
 
 ### AC-004 Worker visibility
 
-Given workers are registered, the dashboard accurately shows standby/busy/offline state and current assignment.
+Dashboard accurately shows worker standby/busy/offline state and current assignments.
 
 ### AC-005 Manual jobs only
 
-No business automation job is created without an explicit operator/system action defined by the product.
+No business automation job is created without an explicit trigger defined by the product.
 
 ### AC-006 Excel defaults
 
-For a legacy-format distributor stock file, SKU defaults to zero-based index 20. Quantity prefers `StokAkhir`, otherwise falls back to zero-based index 71.
+Legacy-format stock files default to SKU index 20 and quantity `StokAkhir`, falling back to index 71.
 
-### AC-007 Manual mapping override
+### AC-007 Mapping override
 
-Operators can override the detected SKU/quantity/warehouse/active columns via dropdowns before processing.
+Operators can override detected SKU/quantity/warehouse/active columns via dropdowns.
 
 ### AC-008 SKU normalization
 
-`135428` becomes `0135428`; `22583` becomes `022583`; `8021803` remains `8021803` without a special hardcoded exclusion.
+`135428` becomes `0135428`; `22583` becomes `022583`; `8021803` remains `8021803` without a special exclusion.
 
 ### AC-009 Multiplier
 
@@ -729,30 +565,28 @@ Given raw quantity 50 and multiplier 2, comparison quantity is 100 before compar
 
 ### AC-010 Comparison
 
-Given Newspage 100 and Distributor 80, `Selisih = -20` and the adjustment quantity is -20.
+Given Newspage 100 and Distributor 80, `Selisih = -20` and adjustment quantity is -20.
 
 ### AC-011 Cancellation
 
-An authorized cancel request moves the run through `cancelling`, aborts the ARQ job, terminates Playwright resources, persists `cancelled`, and only then releases the distributor lock.
+Authorized cancel moves the run through `cancelling`, aborts ARQ, terminates Playwright resources, persists `cancelled`, and only then releases the distributor lock.
 
 ### AC-012 Credential safety
 
-No plaintext distributor credential is present in the ARQ payload, logs, SSE events, or frontend response after storage.
+Plaintext distributor credentials never appear in ARQ payloads, logs, SSE events, or frontend responses after storage.
 
 ### AC-013 Reproducibility
 
-A run preserves the parser/timeout/retry configuration snapshot used for that execution.
+A run stores the parser/timeout/retry configuration snapshot used for that execution.
 
 ### AC-014 Audit
 
-Administrative configuration changes are recorded with actor, action, entity and timestamp.
+Administrative configuration changes record actor, action, entity, and timestamp.
 
-## 27. Locked Decisions
-
-The following are accepted product decisions unless explicitly changed:
+## Locked Decisions
 
 1. Project repo: `nerfbreak/NP-Next`.
-2. Legacy repo remains reference-only.
+2. Legacy repo is reference-only.
 3. Streamlit is removed completely.
 4. Next.js + TypeScript frontend.
 5. FastAPI backend.
@@ -762,9 +596,9 @@ The following are accepted product decisions unless explicitly changed:
 9. Roles: Superuser and Operator only.
 10. Lock per distributor.
 11. Different distributors can run concurrently.
-12. Distributor stores credential + warehouse + optional parser override.
+12. Distributor stores credentials, warehouse, and optional parser override.
 13. Login URL is global.
-14. Distributor selectors are searchable because the fleet is 95+ and growing.
+14. Distributor selectors are searchable.
 15. Global Excel defaults: SKU index 20; quantity `StokAkhir`, fallback index 71.
 16. Dropdown overrides remain available.
 17. INVT_MASTER is fixed.
